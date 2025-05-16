@@ -1,0 +1,48 @@
+# 备份文件
+backup/
+# 柱状图
+bar/
+# 权重
+checkpoint/
+# 配置文件
+configs/
+# 纹理图
+color_texture/
+# 输出目录
+output/
+# 数据集配置
+datasets/
+# 数据暂存目录
+data/
+# 工具
+utils/
+# 命令行
+scripts/
+# 其他py文件
+ZSCLIP_main.py
+apollo_main.py
+bar_sun.py
+bar_hard.py
+CoOp_main.py
+color_texture.py
+crop_and_select.py
+draw_tsne_pic.py
+draw_tsne_pic_domain1.py
+tsne.py
+zs_acc.py
+# 其他文件
+domain1-5.csv
+domain1.csv
+domain1_fea.csv
+domain_fea.csv
+tsne_data.pkl
+tsne_data_domain1.pkl
+tsne_rgb.png
+tsne_visualization.png
+tsne_visualization_domain1.png
+
+trainer/
+!trainer/DPM_noa.py
+!trainer/DPM_noa_local.py
+!trainer/DPM_randomcutood.py
+!trainer/DPM_randomcutood_local.py
