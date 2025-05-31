@@ -1,3 +1,0 @@
-CUDA_VISIBLE_DEVICES=2,3 python DPM_main.py --config-file ./config/trainer/ImageNet_b16_DPM.yaml --model_path ./checkpoint/ViT-B-16.pt --output_dir ./output/DPM/loss2+3/b16_ep20 --train --loss2 1 --loss3 1
-CUDA_VISIBLE_DEVICES=2,3 python DPM_main.py --config-file ./config/trainer/ImageNet_b16_DPM.yaml --model_path ./checkpoint/ViT-B-16.pt --output_dir ./output/DPM/loss2/b16_ep20 --train --loss2 1 --loss3 0
-CUDA_VISIBLE_DEVICES=2,3 python DPM_main.py --config-file ./config/trainer/ImageNet_b16_DPM.yaml --model_path ./checkpoint/ViT-B-16.pt --output_dir ./output/DPM/loss3/b16_ep20 --train --loss2 0 --loss3 1
