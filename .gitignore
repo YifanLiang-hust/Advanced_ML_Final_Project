@@ -2,9 +2,27 @@
 output/
 data/
 checkpoint/
+.ypc
 # 忽略所有 __pycache__ 目录
 __pycache__/
 */__pycache__/
 **/__pycache__/
+# 其他忽略的目录
+demo/
+loralib/
+bar/
+bar.py
+DPM_main.py
+# trainer
+trainer/locoop_dpm.py
+trainer/zsclip.py
+trainer/notused/
+# utils
+utils/plot_util.py
+utils/utils.py
+# script
+script/DPM/
+script/LoCoOp/
+script/lora.sh
 
 

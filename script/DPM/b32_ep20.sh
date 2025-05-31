@@ -1,2 +1,0 @@
-CUDA_VISIBLE_DEVICES=0,1 python DPM_main.py --config-file ./config/trainer/ImageNet_b32.yaml --model_path ./checkpoint/ViT-B-32.pt --output_dir ./output/DPM/b32_ep20 --train --load --test --ood --load_epoch 20 --loss2 1 --loss3 1
-CUDA_VISIBLE_DEVICES=0,1 python DPM_main.py --config-file ./config/trainer/ImageNet_b32.yaml --model_path ./checkpoint/ViT-B-32.pt --output_dir ./output/DPM/b32_ep20 --train --load --test --ood --load_epoch 20 --loss2 1 --loss3 0

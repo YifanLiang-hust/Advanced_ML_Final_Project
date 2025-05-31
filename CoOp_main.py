@@ -10,13 +10,33 @@ from dassl.engine import build_trainer
 
 import dataset.imagenet
 
-import trainer.locoop
+import trainer.zsclip
+import trainer.dpcoop
+import trainer.dplocoop
+import trainer.locoop_dpm
+import trainer.dpsct
 
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from utils.detection_util import get_and_print_results
-from utils.plot_util import plot_distribution
 
+import pickle
+from PIL import Image
+
+class MyDataset(torch.utils.data.Dataset):
+    def __init__(self, pkl_path, transform):
+        self.transform = transform
+        with open(pkl_path, 'rb') as f:
+            self.data = pickle.load(f) 
+    def __getitem__(self, idx):
+
+        x = self.data['train'][idx].impath
+        y = self.data['train'][idx].label
+        img = Image.open(x)
+        img = self.transform(img)
+        return img, y
+    def __len__(self):
+
+        return len(self.data['train'])
 
 def print_args(args, cfg):
     print("***************")
@@ -83,7 +103,6 @@ def extend_cfg(cfg):
 
     cfg.TRAINER.COOP = CN()
     cfg.TRAINER.COOP.N_CTX = 16  # number of context vectors
-    # cfg.TRAINER.COOP.CSC = True  # class-specific context
     cfg.TRAINER.COOP.CSC = False  # class-specific context
     cfg.TRAINER.COOP.CTX_INIT = ""  # initialization words
     cfg.TRAINER.COOP.PREC = "fp16"  # fp16, fp32, amp
@@ -147,9 +166,25 @@ def main(args):
     import clip_w_local
     _, preprocess = clip_w_local.load(args.model_path)
 
+    if cfg.DATASET.NAME == 'ImageNet':
+        out_datasets = ['iNaturalist', 'SUN', 'Places', 'texture']
+        trainset_dir = os.path.join(args.root, 'ID', 'ImageNet', 'split_fewshot', f'shot_{args.shot}-seed_{args.seed}.pkl')
+        trainset = MyDataset(trainset_dir, preprocess)
+        train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=16,
+                                        drop_last=False, pin_memory=True)
+        testset_dir  = os.path.join(args.root, "ID", "ImageNet", "val")
+
+    test_set = torchvision.datasets.ImageFolder(testset_dir, transform=preprocess)
+    id_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=16, 
+                                    drop_last=False, pin_memory=True)
+    ood_loader_list = []
+    for out_dataset in out_datasets:
+        ood_loader = set_ood_loader(args, out_dataset, preprocess)
+        ood_loader_list.append(ood_loader)
+
     if args.train:
         print(f"Start training")
-        trainer.train()
+        trainer.train(train_loader, id_loader, ood_loader_list, out_datasets)
     if args.load:
         print(f"Load model from {args.output_dir}")
         trainer.load_model(args.output_dir, epoch=args.load_epoch)
@@ -158,39 +193,17 @@ def main(args):
         trainer.test()
     if args.ood:
         print(f"Start OOD detection")
-        if cfg.DATASET.NAME == 'ImageNet':
-            out_datasets = ['iNaturalist', 'SUN', 'Places', 'texture']
-            testset_dir  = os.path.join(args.root, "ID", "ImageNet", "val")
-
-        test_set = torchvision.datasets.ImageFolder(testset_dir, transform=preprocess)
-        id_data_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, num_workers=16, 
-                                    drop_last=False, pin_memory=True)
-
-        label_pre_mcm, label_pre_gl, in_score_mcm, in_score_gl = trainer.test_ood(id_data_loader, args.T)
-    
-        auroc_list_mcm, aupr_in_list_mcm, aupr_out_list_mcm, fpr_list_mcm = [], [], [], []
-        auroc_list_glmcm, aupr_in_list_glmcm, aupr_out_list_glmcm, fpr_list_glmcm = [], [], [], []
-
-        for out_dataset in out_datasets:
-            print(f"Evaluting OOD dataset {out_dataset}")
-            ood_loader = set_ood_loader(args, out_dataset, preprocess)
-            _, _, out_score_mcm, out_score_gl = trainer.test_ood(ood_loader, args.T)
-
-            print("MCM score")
-            get_and_print_results(args.output_dir, in_score_mcm, out_score_mcm,
-                                auroc_list_mcm, aupr_in_list_mcm, 
-                                aupr_out_list_mcm, fpr_list_mcm)
-
-            print("GL-MCM score")
-            get_and_print_results(args.output_dir, in_score_gl, out_score_gl,
-                                auroc_list_glmcm, aupr_in_list_glmcm, 
-                                aupr_out_list_glmcm, fpr_list_glmcm)
-
-            # plot_distribution(args, in_score_mcm, out_score_mcm, out_dataset, score='MCM')
-            # plot_distribution(args, in_score_gl, out_score_gl, out_dataset, score='GLMCM')
-
-        print("MCM avg. AUROC:{:.4f}, FPR:{:.4f}, AUPR_IN:{:.4f}, AUPR_OUT:{:.4f}".format(np.mean(auroc_list_mcm), np.mean(fpr_list_mcm), np.mean(aupr_in_list_mcm), np.mean(aupr_out_list_mcm)))
-        print("GL-MCM avg. AUROC:{:.4f}, FPR:{:.4f}, AUPR_IN:{:.4f}, AUPR_OUT:{:.4f}".format(np.mean(auroc_list_glmcm), np.mean(fpr_list_glmcm),  np.mean(aupr_in_list_glmcm), np.mean(aupr_out_list_glmcm)))
+        trainer.test_ood(train_loader, id_loader, ood_loader_list, out_datasets, t=args.T, f=args.f)
+    if args.plot:
+        print(f"Start plotting")
+        optimal_params = {
+            'glmcm': {'alpha': 1.0, 'beta': 0.0},
+            'glmcm_softmax_kl': {'alpha': 1.0, 'beta': args.beta}
+        }
+        trainer.plot_ood(train_loader, id_loader, ood_loader_list, out_datasets, optimal_params=optimal_params, t=args.T, f=args.f)
+    if args.tsne:
+        print(f"Start t-SNE visualization")
+        trainer.draw_tsne(id_loader, ood_loader_list, out_datasets)
     print('over')
     return
 
@@ -201,13 +214,16 @@ if __name__ == "__main__":
     parser.add_argument("--load", action="store_true", help="load model")
     parser.add_argument("--test", action="store_true", help="perform testing")
     parser.add_argument("--ood", action="store_true", help="perform ood detection")
+    parser.add_argument("--plot", action="store_true", help="plot ood detection results")
+    parser.add_argument("--beta", type=float, default=0.0, help="beta value for DPM")
+    parser.add_argument("--tsne", action="store_true", help="perform t-SNE visualization")
     parser.add_argument("--batch_size", type=int, default=128, help="batch size")
     parser.add_argument("--model_path", type=str, 
                         default="./checkpoint/ViT-B-16.pt", 
                         help="path to CLIP checkpoint")
     parser.add_argument("--root", type=str, default="./data", help="path to dataset")
     parser.add_argument("--output_dir", type=str, default="./output/LoCoOp", help="output directory")
-    parser.add_argument("--load_epoch", type=int, default=50, help="load model weights at this epoch for evaluation")
+    parser.add_argument("--load_epoch", type=int, default=20, help="load model weights at this epoch for evaluation")
     parser.add_argument(
         "--resume",
         type=str,
@@ -241,13 +257,15 @@ if __name__ == "__main__":
         nargs=argparse.REMAINDER,
         help="modify config options using the command-line",
     )
-    # parameters for LoCoOp
+    # parameters for LoCoOp and SCT
     parser.add_argument('--lambda_value', type=float, default=0.25,
                         help='weight for regulization loss')
     parser.add_argument('--topk', type=int, default=200,
                         help='topk for extracted OOD regions')
-    parser.add_argument('--T', type=float, default=1,
+    parser.add_argument('--T', type=float, default=10,
                         help='temperature parameter')
+    parser.add_argument('--f', type=float, default=0.5,
+                        help='factor for GLMCM')
 
     args = parser.parse_args()
     main(args)

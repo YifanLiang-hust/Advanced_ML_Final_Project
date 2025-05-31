@@ -123,3 +123,4 @@ def get_and_print_results(args, in_score, out_score, auroc_list, aupr_in_list, a
     fpr_list.append(fpr)  # used to calculate the avg over multiple OOD test sets
     
     print("AUROC:{:.4f}, FPR:{:.4f}, AURP_IN:{:.4f}, AUPR_OUT:{:.4f}".format(auroc, fpr, aupr_in, aupr_out))
+    return auroc, fpr, aupr_in, aupr_out
