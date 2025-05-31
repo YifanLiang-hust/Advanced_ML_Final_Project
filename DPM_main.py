@@ -10,64 +10,12 @@ import torchvision
 from torchvision import transforms
 warnings.filterwarnings("ignore")
 
-import datasets.Benchmark_RGB_RGB
-import datasets.Benchmark_RGB_IR
-import datasets.Benchmark_RGB_MS
-import datasets.Benchmark_RGB_A
-import datasets.Benchmark_RGB_Re
+import dataset.imagenet
 
-import datasets.Benchmark_IR_IR
-import datasets.Benchmark_MS_MS
-import datasets.Benchmark_A_A
-import datasets.Benchmark_Re_Re
-
-import datasets.Benchmark_RGB_RGB_ALL
-import datasets.Benchmark_IR_IR_ALL
-import datasets.Benchmark_MS_MS_ALL
-import datasets.Benchmark_A_A_ALL
-import datasets.Benchmark_Re_Re_ALL
-
-import datasets.imagenet
-
-import trainer.DPM_man
-import trainer.DPM_F
 import trainer.DPM
-import trainer.DPM_loss
-import trainer.DPM_loss1
-import trainer.DPM_loss2
-import trainer.DPM_loss3
-import trainer.DPM_loss12
-import trainer.DPM_loss13
-import trainer.DPM_loss123
-
-import trainer.DPM_a
-import trainer.DPM_noa
-import trainer.DPM_noa_local
-import trainer.DPM_arc
-import trainer.DPM_focal
-# import trainer.DPM_entropy
-# import trainer.DPM_cutmix
-import trainer.DPM_cutmixood
-# import trainer.DPM_cutmixoodbinary
-# import trainer.DPM_gridmix
-import trainer.DPM_gridmixood
-# import trainer.DPM_gridmixoodbinary
-import trainer.DPM_linemixood
-import trainer.DPM_circlemixood
-import trainer.DPM_cornermixood
-import trainer.DPM_patchmixood
-import trainer.DPM_mixupood
-import trainer.DPM_randomcutood
-import trainer.DPM_randomcutood_local
-import trainer.DPM_randomcutood2
-# import trainer.DPM_smooth
-# import trainer.DPM_energy
-# import trainer.DPM_other
-# import trainer.DPM_flood
-# import trainer.DPM_hdm
-import trainer.DPM_locoop
-# import trainer.DPM_cos
-
+# import trainer.DPM_local
+import trainer.DPM_ood
+# import trainer.DPM_ood_local
 
 from time import sleep
 
@@ -140,32 +88,18 @@ def reset_cfg(cfg, args):
     if args.head:
         cfg.MODEL.HEAD.NAME = args.head
 
-    if args.shots:
-        cfg.DATASET.NUM_SHOTS = args.shots
+    if args.shot:
+        cfg.DATASET.NUM_SHOTS = args.shot
 
     if args.root:
         cfg.DATASET.ROOT = args.root
-
-    if args.dff:
-        cfg.dff = args.dff
-
-    if args.num_heads:
-        cfg.num_heads = args.num_heads
     
-
-    cfg.loss_en = args.loss_en
-    cfg.topk = args.topk
     cfg.loss1 = args.loss1
     cfg.loss2 = args.loss2
     cfg.loss3 = args.loss3
-    cfg.loss4 = args.loss4
     cfg.loss1_ood = args.loss1_ood
     cfg.loss2_ood = args.loss2_ood
     cfg.loss3_ood = args.loss3_ood
-
-    cfg.scale = args.scale
-    cfg.margin = args.margin
-    cfg.gamma = args.gamma
 
 
 def extend_cfg(cfg):
@@ -181,18 +115,14 @@ def extend_cfg(cfg):
     """
     from yacs.config import CfgNode as CN
 
-    cfg.TRAINER.DPM = CN()
-    cfg.TRAINER.DPM.PREC = "fp32"  # fp16, fp32, amp
-    cfg.TRAINER.COOP_MLC = CN()
-    cfg.TRAINER.COOP_MLC.N_CTX_POS = 16
-    cfg.TRAINER.COOP_MLC.N_CTX_NEG = 16
-    cfg.TRAINER.COOP_MLC.POSITIVE_PROMPT_INIT = None  # 全部使用可学习的
-    # cfg.TRAINER.COOP_MLC.POSITIVE_PROMPT_INIT = "a photo of"
-    cfg.TRAINER.COOP_MLC.NEGATIVE_PROMPT_INIT = None
-    cfg.TRAINER.COOP_MLC.CSC  = True
+    cfg.TRAINER.COOP = CN()
+    cfg.TRAINER.COOP.N_CTX = 16
+    cfg.TRAINER.COOP.CSC = True
+    cfg.TRAINER.COOP.CTX_INIT = None  # 全部使用可学习的
+    cfg.TRAINER.COOP.PREC = "fp32"  # fp16, fp32, amp
+    cfg.TRAINER.COOP.CLASS_TOKEN_POSITION = "end"  # 'middle' or 'end' or 'front'
 
     cfg.DATASET.SUBSAMPLE_CLASSES = "all"  # all, base or new
-
 
 
 def setup_cfg(args):
@@ -221,43 +151,20 @@ def set_ood_loader(args, out_dataset, preprocess):
 
     from torchvision import datasets
 
-    if out_dataset == 'ImageNetr':
-        testsetout = datasets.ImageFolder(root=os.path.join(root, 'imagenet-r'), transform=preprocess)
-    elif out_dataset == 'cifar10':
-        testsetout = datasets.ImageFolder(root=os.path.join(root, 'cifar10','test'), transform=preprocess)
-    elif out_dataset == 'LSUN':
-        testsetout = datasets.ImageFolder(root=os.path.join(root, 'LSUN_C'), transform=preprocess)
-    elif out_dataset == 'LSUN_R':
-        testsetout = datasets.ImageFolder(root=os.path.join(root, 'LSUN_R'), transform=preprocess)
-
-    elif out_dataset == 'OOD_Easy':
-        testsetout = datasets.ImageFolder(root="/home/data/datasets/Benchmark/OOD/OOD_Easy/test", transform=preprocess)
-    elif out_dataset == 'OOD_Hard':
-        testsetout = datasets.ImageFolder(root="/home/data/datasets/Benchmark/OOD/OOD_Hard/test", transform=preprocess)
-    
-    elif out_dataset == 'OOD_IR':
-        testsetout = datasets.ImageFolder(root="/home/data/datasets/Benchmark/CS-OOD/IR/OOD/test", transform=preprocess)
-    elif out_dataset == 'OOD_MS':
-        testsetout = datasets.ImageFolder(root="/home/data/datasets/Benchmark/CS-OOD/MSRGB/OOD/test", transform=preprocess)
-    elif out_dataset == 'OOD_Re':
-        testsetout = datasets.ImageFolder(root="/home/data/datasets/Benchmark/CS-OOD/Resampling_bias/OOD/test", transform=preprocess)
-    elif out_dataset == 'OOD_A':
-        testsetout = datasets.ImageFolder(root="/home/data/datasets/Benchmark/CS-OOD/Aerial/OOD/test", transform=preprocess)
-    
-    elif out_dataset == 'iNaturalist':
-        testsetout = datasets.ImageFolder(root="/home/data/datasets/xz_OOD/iNaturalist", transform=preprocess)
+    if out_dataset == 'iNaturalist':
+        testsetout = datasets.ImageFolder(root=os.path.join(args.root, "OOD", "iNaturalist"), transform=preprocess)
     elif out_dataset == 'SUN':
-        testsetout = datasets.ImageFolder(root="/home/data/datasets/xz_OOD/SUN", transform=preprocess)
+        testsetout = datasets.ImageFolder(root=os.path.join(args.root, "OOD", "SUN"), transform=preprocess)
     elif out_dataset == 'Places':
-        testsetout = datasets.ImageFolder(root="/home/data/datasets/xz_OOD/places365", transform=preprocess)
+        testsetout = datasets.ImageFolder(root=os.path.join(args.root, "OOD", "Places"), transform=preprocess)
     elif out_dataset == 'texture':
-        testsetout = datasets.ImageFolder(root="/home/data/datasets/xz_OOD/dtd/images", transform=preprocess)
-    elif out_dataset == 'ImageNet-O':
-        testsetout = datasets.ImageFolder(root="/new_data/datasets/OOD/imagenet-o", transform=preprocess)
-    testloaderOut = torch.utils.data.DataLoader(testsetout, batch_size=args.ood_batchsize, shuffle=False, num_workers=16)
+        testsetout = datasets.ImageFolder(root=os.path.join(args.root, "OOD", "Texture", "images"), transform=preprocess)
+    
+    testloaderOut = torch.utils.data.DataLoader(testsetout, batch_size=args.batch_size, shuffle=False, num_workers=16)
     return testloaderOut
 
 def main(args):
+    import os
     cfg = setup_cfg(args)
     if cfg.SEED >= 0:
         print("Setting fixed seed: {}".format(cfg.SEED))
@@ -271,47 +178,13 @@ def main(args):
     trainer = build_trainer(cfg)
     
     import clip
-    _, preprocess = clip.load(args.model_path)
-    # preprocess = transforms.Compose([
-    #     transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BICUBIC, max_size=None, antialias=True),
-    #     transforms.Lambda(lambda image: image.convert("RGB") if image.mode != "RGB" else image),
-    #     transforms.ToTensor(),
-    #     transforms.Normalize(mean=[0.48145466, 0.4578275, 0.40821073], std=[0.26862954, 0.26130258, 0.27577711])
-    # ])
-
-    if cfg.DATASET.NAME == 'Benchmark_RGB_RGB':
-        out_datasets = ['OOD_Easy', 'OOD_Hard', 'SUN']
-        trainset_dir = "/home/data/datasets/Benchmark/OOD/ID/train"
-        trainset =  torchvision.datasets.ImageFolder(trainset_dir, transform=preprocess)
-        testset_dir  = "/home/data/datasets/Benchmark/OOD/ID/test"
-    elif cfg.DATASET.NAME == 'Benchmark_RGB_IR':   
-        out_datasets = ['OOD_IR', 'SUN'] 
-        trainset_dir = "/home/data/datasets/Benchmark/OOD/ID/train"
-        trainset =  torchvision.datasets.ImageFolder(trainset_dir, transform=preprocess)
-        testset_dir  = "/home/data/datasets/Benchmark/CS-OOD/IR/ID/test"
-    elif cfg.DATASET.NAME == 'Benchmark_RGB_MS':
-        out_datasets = ['OOD_MS', 'SUN']
-        trainset_dir = "/home/data/datasets/Benchmark/OOD/ID/train"
-        trainset =  torchvision.datasets.ImageFolder(trainset_dir, transform=preprocess)
-        testset_dir  = "/home/data/datasets/Benchmark/CS-OOD/MSRGB/ID/test"
-    elif cfg.DATASET.NAME == 'Benchmark_RGB_Re':
-        out_datasets = ['OOD_Re', 'OOD_Easy', 'OOD_Hard', 'SUN']
-        trainset_dir = "/home/data/datasets/Benchmark/OOD/ID/train"
-        trainset =  torchvision.datasets.ImageFolder(trainset_dir, transform=preprocess)
-        testset_dir  = "/home/data/datasets/Benchmark/CS-OOD/Resampling_bias/ID/test"
-    elif cfg.DATASET.NAME == 'Benchmark_RGB_A':
-        out_datasets = ['OOD_A', 'SUN']
-        trainset_dir = "/home/data/datasets/Benchmark/OOD/ID/train"
-        trainset =  torchvision.datasets.ImageFolder(trainset_dir, transform=preprocess)
-        testset_dir  = "/home/data/datasets/Benchmark/CS-OOD/Aerial/ID/test"
+    _, preprocess = clip.load(args.model_path)    
         
-        
-    elif cfg.DATASET.NAME == 'ImageNet':
+    if cfg.DATASET.NAME == 'ImageNet':
         out_datasets = ['iNaturalist', 'SUN', 'Places', 'texture']
-        trainset_dir = "/home/data/xz2002/DPM/data/ImageNet/split_fewshot/shot_16-seed_1.pkl"
-        trainset_dir = args.pkl_dir
+        trainset_dir = os.path.join(args.root, 'ID', 'ImageNet', 'split_fewshot', f'shot_{args.shot}-seed_{args.seed}.pkl')
         trainset = MyDataset(trainset_dir, preprocess)
-        testset_dir  = "/home/data/datasets/ImageNet/val"
+        testset_dir  = os.path.join(args.root, 'ID', 'ImageNet', 'val')
 
     train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=False, num_workers=16)
     testset = torchvision.datasets.ImageFolder(testset_dir, transform=preprocess)
@@ -323,7 +196,6 @@ def main(args):
     
     if args.train:
         print(f"Start training")
-        # trainer.train(train_loader, id_loader, ood_loader_list, out_datasets)
         trainer.train()
     if args.load:
         print(f"Load model from {args.output_dir}")
@@ -450,12 +322,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--res", action="store_true", help="use res connection")
-    parser.add_argument("--batch_size", type=int, default=512, help="batch size")
-    parser.add_argument("--ood_batchsize", type=int, default=512, help="ood batch size")
-    parser.add_argument("--num_heads", type=int, default=8, help="number of heads")
-    parser.add_argument("--dff", type=int, default=2048, help="hidden dimension of the feedforward network")
-    parser.add_argument("--pkl_dir", type=str, default="/home/data/xz2002/DPM/data/ImageNet/split_fewshot/shot_16-seed_1.pkl", help="pkl file path")
+    parser.add_argument("--batch_size", type=int, default=128, help="batch size")
     parser.add_argument("--train", action="store_true", help="perform training, when last epoch finished then test")
     parser.add_argument("--load", action="store_true", help="load model")
     parser.add_argument("--test", action="store_true", help="perform testing")
@@ -463,9 +330,10 @@ if __name__ == "__main__":
     parser.add_argument("--plot", action="store_true", help="perform ood plot")
     parser.add_argument("--tsne", action="store_true", help="perform tsne plot")
     parser.add_argument("--vis", action="store_true", help="perform visualization")
-    parser.add_argument("--shots", type=int, default=16, help="number of shots")
-    parser.add_argument("--model_path", type=str, default="/new_data/xz/clip_checkpoint/OriginCLIP/ViT-B-16.pt", help="pretrained model path")
-    parser.add_argument("--root", type=str, default='/home/data/datasets', help="path to dataset")
+
+    parser.add_argument("--shot", type=int, default=16, help="number of shots")
+    parser.add_argument("--model_path", type=str, default="./checkpoint/ViT-B-16.pt", help="pretrained model path")
+    parser.add_argument("--root", type=str, default='./data', help="path to dataset")
     parser.add_argument("--output_dir", type=str, default="", help="output directory")
     parser.add_argument(
         "--resume",
@@ -475,10 +343,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--load_epoch", type=int, default=20, help="load epoch")
     parser.add_argument(
-        "--seed", type=int, default=1555, help="only positive value enables a fixed seed"
+        "--seed", type=int, default=1, help="only positive value enables a fixed seed"
     )
     parser.add_argument(
-        "--loss1", type=float, default=1.0, help=""
+        "--loss1", type=float, default=0.0, help=""
     )
     parser.add_argument(
         "--loss2", type=float, default=1.0, help=""
@@ -487,22 +355,13 @@ if __name__ == "__main__":
         "--loss3", type=float, default=1.0, help=""
     )
     parser.add_argument(
-        "--loss4", type=float, default=1.0, help=""
+        "--loss1_ood", type=float, default=0.0, help=""
     )
     parser.add_argument(
-        "--loss1_ood", type=float, default=1.0, help=""
+        "--loss2_ood", type=float, default=0.0, help=""
     )
     parser.add_argument(
-        "--loss2_ood", type=float, default=1.0, help=""
-    )
-    parser.add_argument(
-        "--loss3_ood", type=float, default=1.0, help=""
-    )
-    parser.add_argument(
-        "--loss_en", type=float, default=0.25, help=""
-    )
-    parser.add_argument(
-        "--topk", type=int, default=20, help="top k"
+        "--loss3_ood", type=float, default=0.0, help=""
     )
     parser.add_argument(
         "--source-domains", type=str, nargs="+", help="source domains for DA/DG"
@@ -514,15 +373,18 @@ if __name__ == "__main__":
         "--transforms", type=str, nargs="+", help="data augmentation methods"
     )
     parser.add_argument(
-        "--config-file", type=str, default="", help="path to config file"
+        "--config-file", 
+        type=str, 
+        default="", 
+        help="path to config file"
     )
     parser.add_argument(
         "--dataset-config-file",
         type=str,
-        default="",
+        default="./config/dataset/imagenet.yaml",
         help="path to config file for dataset setup",
     )
-    parser.add_argument("--trainer", type=str, default="DPM_OOD",help="name of trainer")
+    parser.add_argument("--trainer", type=str, default="DPM",help="name of trainer")
     parser.add_argument("--head", type=str, default="", help="name of head")
     parser.add_argument("--backbone", type=str, default="", help="name of CNN backbone")
 
@@ -532,29 +394,7 @@ if __name__ == "__main__":
         nargs=argparse.REMAINDER,
         help="modify config options using the command-line",
     )
-    parser.add_argument(
-        "--scale", type=float, default=0.0, help="scale factor for arcloss"
-    )
-    parser.add_argument(
-        "--margin", type=float, default=0.0, help="margin for arcloss"
-    )
-    parser.add_argument(
-        "--gamma", type=float, default=2.0, help="gamma for arcloss"
-    )
-    # 添加这些参数
-    # parser.add_argument("--plot_fea1_mls_alpha", type=float, default =  5.6, help="alpha value for fea1_mls")
-    # parser.add_argument("--plot_fea1_mls_beta",  type=float, default = -4.3, help="beta value for fea1_mls")
-    # parser.add_argument("--plot_fea2_mls_alpha", type=float, default =  7.5, help="alpha value for fea2_mls")
-    # parser.add_argument("--plot_fea2_mls_beta",  type=float, default = -5.6, help="beta value for fea2_mls")
-    # parser.add_argument("--plot_fea3_mls_alpha", type=float, default =  9.2, help="alpha value for fea3_mls")
-    # parser.add_argument("--plot_fea3_mls_beta",  type=float, default = -8.1, help="beta value for fea3_mls")
-    # parser.add_argument("--plot_fea1_mcm_alpha", type=float, default =  9.3, help="alpha value for fea1_mcm")
-    # parser.add_argument("--plot_fea1_mcm_beta",  type=float, default = -4.4, help="beta value for fea1_mcm")
-    # parser.add_argument("--plot_fea2_mcm_alpha", type=float, default =  6.7, help="alpha value for fea2_mcm")
-    # parser.add_argument("--plot_fea2_mcm_beta",  type=float, default = -2.2, help="beta value for fea2_mcm")
-    # parser.add_argument("--plot_fea3_mcm_alpha", type=float, default =  10.0, help="alpha value for fea3_mcm")
-    # parser.add_argument("--plot_fea3_mcm_beta",  type=float, default = -9.1, help="beta value for fea3_mcm")
-
+    # distribution plot
     parser.add_argument("--plot_fea1_mls_alpha", type=float, default =  0, help="alpha value for fea1_mls")
     parser.add_argument("--plot_fea1_mls_beta",  type=float, default =  -10, help="beta value for fea1_mls")
     parser.add_argument("--plot_fea2_mls_alpha", type=float, default =  0, help="alpha value for fea2_mls")

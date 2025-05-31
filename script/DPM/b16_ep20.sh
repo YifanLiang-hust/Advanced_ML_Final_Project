@@ -1,0 +1,2 @@
+CUDA_VISIBLE_DEVICES=0,1 python DPM_main.py --config-file ./config/trainer/ImageNet_b16.yaml --model_path ./checkpoint/ViT-B-16.pt --output_dir ./output/DPM/b16_ep20 --train --load --test --ood --load_epoch 20 --loss2 1 --loss3 1
+CUDA_VISIBLE_DEVICES=0,1 python DPM_main.py --config-file ./config/trainer/ImageNet_b16.yaml --model_path ./checkpoint/ViT-B-16.pt --output_dir ./output/DPM/b16_ep20 --train --load --test --ood --load_epoch 20 --loss2 1 --loss3 0
