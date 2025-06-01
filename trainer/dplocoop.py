@@ -232,19 +232,16 @@ class CustomCLIP(nn.Module):
     def get_feature(self, image):
         image_features, local_image_features = self.image_encoder(image.type(self.dtype))
 
-        prompts = self.prompt_learner()
-        tokenized_prompts = self.tokenized_prompts
-        text_features = self.text_encoder(prompts, tokenized_prompts)
-
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         local_image_features = local_image_features / local_image_features.norm(dim=-1, keepdim=True)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
-        return image_features, local_image_features, text_features
+        return image_features, local_image_features
 
 
 @TRAINER_REGISTRY.register()
 class DPLoCoOp(TrainerX):
+    """Local regularized Context Optimization (LoCoOp).
+    """
 
     def check_cfg(self, cfg):
         assert cfg.TRAINER.COOP.PREC in ["fp16", "fp32", "amp"]
@@ -668,8 +665,6 @@ class DPLoCoOp(TrainerX):
                 perf = beta_performance['glmcm_softmax_kl'][global_beta][out_dataset]
                 print(f"{out_dataset} - GLMCM(softmax)+KL - beta={global_beta}: AUROC={perf['auroc']:.4f}, FPR={perf['fpr']:.4f}")
 
-        # 在函数结尾处，打印全局最佳参数后，添加以下代码
-
         # 计算和打印每个数据集各自最佳性能的平均值
         print("\n各数据集各自最佳性能平均值:")
         best_auroc_avg = np.mean([dataset_scores[ds]['glmcm_softmax_kl']['auroc'] for ds in out_datasets])
@@ -767,8 +762,8 @@ class DPLoCoOp(TrainerX):
         return contains_label
 
     @torch.no_grad()
-    def plot_ood(self, train_loader, id_loader, ood_loader_list, out_datasets, optimal_params=None, output_dir='./distributions', t=10, f=0.5):
-        """绘制OOD检测分布图 - 使用传入的最佳参数"""
+    def plot_ood(self, train_loader, id_loader, ood_loader_list, out_datasets, optimal_params=None, output_dir='distributions', t=10, f=0.5):
+        """绘制OOD检测分布图 - 使用与test_ood相同的计算方式"""
         import matplotlib.pyplot as plt
         import seaborn as sns
         import os
@@ -782,22 +777,17 @@ class DPLoCoOp(TrainerX):
             x_max = np.max(x, axis=axis, keepdims=True)
             e_x = np.exp(x - x_max)
             return e_x / np.sum(e_x, axis=axis, keepdims=True)
-
-        # 辅助函数：特征缩放
+        
         def scale_features(kl_id_norm, kl_ood_norm, in_fea, out_fea):
             x_max = max(kl_id_norm.max(), kl_ood_norm.max())
             x_min = min(kl_id_norm.min(), kl_ood_norm.min())
             target_max = max(np.max(in_fea), np.max(out_fea))
             target_min = min(np.min(in_fea), np.min(out_fea))
-            # 添加小常数避免除零
-            epsilon = 1e-5  
-            # 线性缩放
+            epsilon = 1e-5
             kl_id_norm_scaled = (kl_id_norm - x_min) / (x_max - x_min + epsilon) * (target_max - target_min) + target_min
             kl_ood_norm_scaled = (kl_ood_norm - x_min) / (x_max - x_min + epsilon) * (target_max - target_min) + target_min
-            
             return kl_id_norm_scaled, kl_ood_norm_scaled
         
-        # 单批次计算KL散度
         def compute_kl_efficiently_batch(batch_softmax, class_sim_tensor):
             batch_size = batch_softmax.size(0)
             num_classes = class_sim_tensor.size(0)
@@ -810,42 +800,36 @@ class DPLoCoOp(TrainerX):
                 batch_kl[:, c] = kl_values
             
             return batch_kl.cpu().numpy()
-
-        # 高效提取特征函数
+        
         def extract_features_efficiently(loader, compute_kl=False, class_sim_tensor=None):
-            """高效提取特征，减少内存使用"""
+            """与test_ood中完全相同的特征提取函数"""
             logits_list = []
             local_softmax_max_list = []
             kl_list = []
             
-            for batch_idx, (images, _) in enumerate(tqdm(loader)):
+            for batch_idx, (images, _) in enumerate(tqdm(loader, desc="提取特征")):
                 images = images.cuda()
                 global_logits, local_logits = self.model(images)
                 
-                # 处理全局特征
                 batch_logits = global_logits.cpu().numpy()
                 logits_list.append(batch_logits)
                 
-                # 对softmax后的logits计算局部特征最大值
                 local_softmax = F.softmax(local_logits / t, dim=-1)
                 local_softmax_max = torch.max(local_softmax, dim=2)[0]
                 local_softmax_max = torch.max(local_softmax_max, dim=1)[0].cpu().numpy()
                 local_softmax_max_list.append(local_softmax_max)
                 
-                # 如果需要计算KL散度
                 if compute_kl and class_sim_tensor is not None:
                     batch_softmax = F.softmax(global_logits / t, dim=-1)
                     batch_kl = compute_kl_efficiently_batch(batch_softmax, class_sim_tensor)
                     kl_list.append(batch_kl)
                 
-                # 手动清理内存
                 del global_logits, local_logits, local_softmax
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             
-            # 合并结果
-            logits = np.concatenate(logits_list, axis=0) if logits_list else np.array([])
-            local_softmax_max = np.concatenate(local_softmax_max_list, axis=0) if local_softmax_max_list else np.array([])
+            logits = np.concatenate(logits_list, axis=0) if len(logits_list) > 0 else np.array([])
+            local_softmax_max = np.concatenate(local_softmax_max_list, axis=0) if len(local_softmax_max_list) > 0 else np.array([])
             
             if compute_kl and len(kl_list) > 0:
                 kl = np.concatenate(kl_list, axis=0)
@@ -857,18 +841,20 @@ class DPLoCoOp(TrainerX):
         if optimal_params is None:
             optimal_params = {'glmcm_softmax_kl': {'beta': -0.5, 'alpha': 1.0}}
         
-        # 获取训练集类均值
+        # 创建输出目录
+        output_path = os.path.join(self.output_dir, output_dir)
+        os.makedirs(output_path, exist_ok=True)
+        
+        # 获取训练集类均值 (与test_ood完全一致)
         print('获取训练集类均值...')
         total_logit, labels = [], []
 
         with torch.no_grad():
-            for batch_idx, (images, label) in enumerate(tqdm(train_loader)):
+            for batch_idx, (images, label) in enumerate(tqdm(train_loader, desc="处理训练集")):
                 images = images.cuda()
                 global_logits, _ = self.model(images)
                 labels.append(label)
                 total_logit.append(global_logits.cpu())
-                
-                # 每5个批次清理内存
                 if batch_idx % 5 == 0:
                     torch.cuda.empty_cache()
 
@@ -876,61 +862,59 @@ class DPLoCoOp(TrainerX):
         labels = torch.cat(labels, dim=0).cpu().numpy()
         num_classes = self.dm.num_classes
 
-        # 应用softmax，计算类均值
         total_logit_softmax = F.softmax(total_logit / t, dim=-1).numpy()
         class_sim_mean = np.array([total_logit_softmax[labels == i].mean(axis=0) for i in range(num_classes)])
         class_sim_tensor = torch.from_numpy(class_sim_mean).float().cuda()
         
-        # 释放不再需要的内存
         del total_logit, total_logit_softmax
         torch.cuda.empty_cache()
         
-        # 获取ID数据集的特征
+        # 获取ID数据集的特征 (与test_ood完全一致)
         print('获取ID数据集特征...')
         id_logits, id_local_softmax_max, id_kl = extract_features_efficiently(
             id_loader, compute_kl=True, class_sim_tensor=class_sim_tensor
         )
         
-        # 计算ID数据集的GLMCM分数
         id_logits_softmax = softmax_numpy(id_logits / t)
         id_glmcm_softmax = np.max(id_logits_softmax, axis=1) + f * id_local_softmax_max
+        kl_id_norm = np.min(id_kl, axis=1)
         
-        # 清理内存
         del id_logits_softmax
         torch.cuda.empty_cache()
         
-        # 处理KL散度
-        kl_id_norm = np.min(id_kl, axis=1)
+        # 初始化结果收集列表
+        results = {}
+        for method_name in optimal_params.keys():
+            results[method_name] = {'auroc': [], 'aupr_in': [], 'aupr_out': [], 'fpr': []}
         
-        # 对每个OOD数据集绘制分布图
+        # 为选定的OOD数据集绘制分布图
         for i, out_dataset in enumerate(out_datasets):
             if i > 0:
                 break
             print(f"\n处理OOD数据集 {out_dataset}")
             ood_loader = ood_loader_list[i]
             
-            # 获取OOD数据集的特征
+            # 获取OOD数据集的特征 (与test_ood完全一致)
             print('获取OOD数据集特征...')
             ood_logits, ood_local_softmax_max, ood_kl = extract_features_efficiently(
                 ood_loader, compute_kl=True, class_sim_tensor=class_sim_tensor
             )
             
-            # 计算OOD数据集的GLMCM分数
             ood_logits_softmax = softmax_numpy(ood_logits / t)
             ood_glmcm_softmax = np.max(ood_logits_softmax, axis=1) + f * ood_local_softmax_max
-            
-            # 清理内存
-            del ood_logits_softmax
-            torch.cuda.empty_cache()
-            
-            # 缩放KL散度特征
             kl_ood_norm = np.min(ood_kl, axis=1)
-            kl_id_norm_softmax_scaled, kl_ood_norm_softmax_scaled = scale_features(
+            
+            # 缩放KL散度特征 (与test_ood完全一致)
+            kl_id_norm_scaled, kl_ood_norm_scaled = scale_features(
                 kl_id_norm, kl_ood_norm, 
                 id_glmcm_softmax, ood_glmcm_softmax
             )
             
-            # 直接使用传入的optimal_params计算分数和绘制图表
+            # 创建数据集输出目录
+            dataset_dir = os.path.join(output_path, out_dataset)
+            os.makedirs(dataset_dir, exist_ok=True)
+            
+            # 使用传入的optimal_params计算分数和绘制图表
             for method_name, params in optimal_params.items():
                 alpha = params.get('alpha', 1.0)
                 beta = params.get('beta', -0.5)
@@ -938,39 +922,30 @@ class DPLoCoOp(TrainerX):
                 print(f"使用参数: method={method_name}, alpha={alpha}, beta={beta} 绘制分布图")
                 
                 # 计算最终分数
-                id_scores = alpha * id_glmcm_softmax + beta * kl_id_norm_softmax_scaled
-                ood_scores = alpha * ood_glmcm_softmax + beta * kl_ood_norm_softmax_scaled
+                id_scores = alpha * id_glmcm_softmax + beta * kl_id_norm_scaled
+                ood_scores = alpha * ood_glmcm_softmax + beta * kl_ood_norm_scaled
                 
-                # 计算性能指标
-                # FPR@95%TPR的计算
-                threshold = np.percentile(id_scores, 5)  # 5%分位点，使95%的ID样本正确分类
-                fpr = (ood_scores >= threshold).mean()  # OOD样本被错分为ID的比例
+                # 使用与test_ood完全相同的get_and_print_results函数计算性能指标
+                auroc, fpr, aupr_in, aupr_out = get_and_print_results(
+                    out_dataset, 
+                    id_scores, 
+                    ood_scores, 
+                    results[method_name]['auroc'],
+                    results[method_name]['aupr_in'],
+                    results[method_name]['aupr_out'],
+                    results[method_name]['fpr']
+                )
                 
-                # 计算AUROC
-                from sklearn.metrics import roc_auc_score
-                labels = np.zeros(len(id_scores) + len(ood_scores), dtype=np.int32)
-                labels[:len(id_scores)] = 1  # ID标签为1
-                scores = np.concatenate((id_scores, ood_scores))
-                auroc = roc_auc_score(labels, scores)
-                
-                # 创建输出目录
-                method_dir = os.path.join(self.output_dir, output_dir, out_dataset)
-                os.makedirs(method_dir, exist_ok=True)
-                
-                # 文件名
+                # 用描述性文件名
                 file_name = f"{method_name}_alpha{alpha}_beta{beta}_auroc{auroc:.4f}_fpr{fpr:.4f}"
                 
-                # 绘制分布图
-                self.plot_distribution(method_dir, id_scores, ood_scores, file_name, fpr)
-
-            # 处理完一个数据集后，清理内存
-            del ood_logits, ood_local_softmax_max, ood_kl, ood_glmcm_softmax
-            torch.cuda.empty_cache()
-        
-        # 全部处理完成后，清理剩余内存
-        del id_logits, id_local_softmax_max, id_kl, id_glmcm_softmax
-        torch.cuda.empty_cache()
-                
+                # 绘制分布图 (核心功能)
+                print(f"绘制分布图: {file_name}")
+                self.plot_distribution(dataset_dir, id_scores, ood_scores, file_name, fpr)
+            
+            # 清理内存
+            del ood_logits, ood_local_softmax_max, ood_kl, ood_logits_softmax, ood_glmcm_softmax
+            torch.cuda.empty_cache()               
 
     def plot_distribution(self, output_dir, id_scores, ood_scores, file_name, fpr):
         """绘制ID和OOD分数的分布"""
@@ -1020,5 +995,154 @@ class DPLoCoOp(TrainerX):
         print(f"保存图像到: {file_path}")
         g.savefig(file_path, bbox_inches='tight')
         plt.close()
+
+    @torch.no_grad()
+    def draw_tsne(self, id_loader, ood_loader_list, out_datasets,  
+                  perplexity=30, n_iter=1000, random_state=42):
+        """
+        创建一个t-SNE可视化，展示ID和OOD数据的全局视觉特征
+        
+        参数:
+            id_loader: ID数据的DataLoader
+            ood_loader_list: OOD数据加载器列表
+            out_datasets: OOD数据集名称列表，与ood_loader_list对应
+            output_dir: 输出目录
+            perplexity: t-SNE的perplexity参数
+            n_iter: t-SNE的迭代次数
+            random_state: 随机种子
+        """
+        import os
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from sklearn.manifold import TSNE
+        from collections import defaultdict
+        
+        self.model.eval()
+        
+        # 定义颜色和标记
+        colors = {'ID': '#3498DB'}  # 蓝色
+        markers = {'ID': 'o'}
+        
+        # 为OOD数据集指定颜色和标记
+        ood_colors = ['#2ECC71', '#F39C12', '#FF1493', '#1ABC9C']  
+        # 绿色，橙色，品红色，青绿色
+        for i, dataset in enumerate(out_datasets):
+            colors[dataset] = ood_colors[i % len(ood_colors)]
+            markers[dataset] = 'x'
+        
+        # 收集特征
+        features = defaultdict(list)
+        
+        # 1. 收集ID数据的全局视觉特征
+        print("获取ID数据特征...")
+        with torch.no_grad():
+            for batch_idx, (images, _) in enumerate(tqdm(id_loader, desc="处理ID数据")):
+                # 确保批次大小不为0
+                if images.size(0) == 0:
+                    continue
+                
+                images = images.to(self.device)
+                # 获取特征
+                image_features, _ = self.model.get_feature(images)
+                
+                # 保存全局视觉特征
+                features['ID'].append(image_features.cpu().numpy())
+                
+                # 限制处理的样本数量以避免内存问题
+                if len(features['ID']) >= 1000:  # 可以调整此数字
+                    break
+        
+        # 合并收集的ID特征
+        if features['ID']:
+            features['ID'] = np.vstack(features['ID'])
+        
+        # 2. 收集OOD数据的全局视觉特征
+        for i, (ood_name, ood_loader) in enumerate(zip(out_datasets, ood_loader_list)):
+            print(f"获取{ood_name}数据特征...")
+            with torch.no_grad():
+                for batch_idx, (images, _) in enumerate(tqdm(ood_loader, desc=f"处理{ood_name}数据")):
+                    # 确保批次大小不为0
+                    if images.size(0) == 0:
+                        continue
+                    
+                    images = images.to(self.device)
+                    # 获取特征
+                    image_features, _ = self.model.get_feature(images)
+                    
+                    # 保存全局视觉特征
+                    features[ood_name].append(image_features.cpu().numpy())
+                    
+                    # 限制处理的样本数量
+                    if len(features[ood_name]) >= 1000:  # 可以调整此数字
+                        break
+            
+            # 合并收集的OOD特征
+            if features[ood_name]:
+                features[ood_name] = np.vstack(features[ood_name])
+        
+        # 合并所有特征用于t-SNE
+        print("合并特征并应用t-SNE...")
+        all_features = []
+        feature_types = []
+        
+        for feature_type, feature_list in features.items():
+            if len(feature_list) > 0:  # 确保有特征
+                all_features.append(feature_list)
+                feature_types.extend([feature_type] * len(feature_list))
+        
+        if not all_features:
+            print("没有收集到特征，无法创建t-SNE可视化")
+            return
+        
+        all_features = np.vstack(all_features)
+        
+        # 应用t-SNE降维
+        tsne = TSNE(n_components=2, perplexity=min(perplexity, len(all_features)-1), 
+                    n_iter=n_iter, random_state=random_state)
+        embeddings_2d = tsne.fit_transform(all_features)
+        
+        # 创建可视化
+        plt.figure(figsize=(12, 10))
+        # 移除坐标轴刻度
+        plt.xticks([])
+        plt.yticks([])
+        plt.grid(False)
+        
+        # 跟踪已绘制的类别，以避免在图例中重复
+        plotted_types = set()
+        
+        # 绘制数据点
+        start_idx = 0
+        for feature_type, feature_list in features.items():
+            if len(feature_list) > 0:
+                end_idx = start_idx + len(feature_list)
+                type_embeddings = embeddings_2d[start_idx:end_idx]
+                
+                plt.scatter(
+                    type_embeddings[:, 0], 
+                    type_embeddings[:, 1],
+                    c=colors[feature_type],
+                    marker=markers[feature_type],
+                    s=30,
+                    alpha=0.6,
+                    label=None if feature_type in plotted_types else feature_type,
+                    edgecolors='w',
+                    linewidth=0.5
+                )
+                
+                plotted_types.add(feature_type)
+                start_idx = end_idx
+        
+        plt.grid(False)
+        plt.legend(fontsize=14, loc='best', markerscale=2)
+        
+        # 保存图像
+        file_path = os.path.join(self.output_dir, "tsne", "tsne_visual_features.png")
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        plt.tight_layout()
+        plt.savefig(file_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"t-SNE可视化已保存到: {file_path}")
 
     

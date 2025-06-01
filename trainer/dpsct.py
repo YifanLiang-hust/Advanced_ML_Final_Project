@@ -234,19 +234,6 @@ class CustomCLIP(nn.Module):
 
         return logits, logits_local
 
-    def get_feature(self, image):
-        image_features, local_image_features = self.image_encoder(image.type(self.dtype))
-
-        prompts = self.prompt_learner()
-        tokenized_prompts = self.tokenized_prompts
-        text_features = self.text_encoder(prompts, tokenized_prompts)
-
-        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        local_image_features = local_image_features / local_image_features.norm(dim=-1, keepdim=True)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
-        return image_features, local_image_features, text_features
-
 
 @TRAINER_REGISTRY.register()
 class DPSCT(TrainerX):
@@ -680,8 +667,6 @@ class DPSCT(TrainerX):
             if global_beta in beta_performance['glmcm_softmax_kl'] and out_dataset in beta_performance['glmcm_softmax_kl'][global_beta]:
                 perf = beta_performance['glmcm_softmax_kl'][global_beta][out_dataset]
                 print(f"{out_dataset} - GLMCM(softmax)+KL - beta={global_beta}: AUROC={perf['auroc']:.4f}, FPR={perf['fpr']:.4f}")
-
-        # 在函数结尾处，打印全局最佳参数后，添加以下代码
 
         # 计算和打印每个数据集各自最佳性能的平均值
         print("\n各数据集各自最佳性能平均值:")

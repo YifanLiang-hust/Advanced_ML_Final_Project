@@ -4,16 +4,14 @@ import argparse
 import torch
 import torchvision
 import numpy as np
-from dassl.utils import setup_logger, set_random_seed, collect_env_info
+from dassl.utils import setup_logger, set_random_seed
 from dassl.config import get_cfg_default
 from dassl.engine import build_trainer
 
 import dataset.imagenet
 
-import trainer.zsclip
 import trainer.dpcoop
 import trainer.dplocoop
-import trainer.locoop_dpm
 import trainer.dpsct
 
 from torch.utils.data import DataLoader
@@ -193,14 +191,14 @@ def main(args):
         trainer.test()
     if args.ood:
         print(f"Start OOD detection")
-        trainer.test_ood(train_loader, id_loader, ood_loader_list, out_datasets, t=args.T, f=args.f)
+        trainer.test_ood(train_loader, id_loader, ood_loader_list, out_datasets)
     if args.plot:
         print(f"Start plotting")
         optimal_params = {
             'glmcm': {'alpha': 1.0, 'beta': 0.0},
             'glmcm_softmax_kl': {'alpha': 1.0, 'beta': args.beta}
         }
-        trainer.plot_ood(train_loader, id_loader, ood_loader_list, out_datasets, optimal_params=optimal_params, t=args.T, f=args.f)
+        trainer.plot_ood(train_loader, id_loader, ood_loader_list, out_datasets, optimal_params=optimal_params)
     if args.tsne:
         print(f"Start t-SNE visualization")
         trainer.draw_tsne(id_loader, ood_loader_list, out_datasets)
@@ -248,7 +246,7 @@ if __name__ == "__main__":
         default="./config/dataset/imagenet.yaml",
         help="path to config file for dataset setup",
     )
-    parser.add_argument("--trainer", type=str, default="LoCoOp", help="name of trainer")
+    parser.add_argument("--trainer", type=str, default="DPLoCoOp", help="name of trainer")
     parser.add_argument("--backbone", type=str, default="", help="name of CNN backbone")
     parser.add_argument("--head", type=str, default="", help="name of head")
     parser.add_argument(
@@ -262,10 +260,6 @@ if __name__ == "__main__":
                         help='weight for regulization loss')
     parser.add_argument('--topk', type=int, default=200,
                         help='topk for extracted OOD regions')
-    parser.add_argument('--T', type=float, default=10,
-                        help='temperature parameter')
-    parser.add_argument('--f', type=float, default=0.5,
-                        help='factor for GLMCM')
 
     args = parser.parse_args()
     main(args)
